@@ -229,14 +229,14 @@ bool FtpClient::up(File& f0)
         std::cerr << "Failed to open file: " << filename << "\n";
         return false;
     }
-    std::cout << "File opened: " << f.is_open() << std::endl;
+    //std::cout << "File opened: " << f.is_open() << std::endl;
     // 读取文件内容并发送给服务器
     while (f.good())
     {
-        std::cout << "in\n";
+        //std::cout << "in\n";
         f.read(buffer, sizeof(buffer));
         len = f.gcount();
-        std::cout << len;
+        std::cout << "文件大小：" << len << "B" << " ";
         send(sock, buffer, len, 0);
     }
     std::cout << "发送成功" << std::endl;
@@ -305,7 +305,7 @@ bool FtpClient::down(File& f0)
     std::string msg;
     int fileLength;
     iss >> code  >> fileLength;
-    std::cout << code <<" "<< fileLength << std::endl;
+    std::cout << "响应码：" << code << " " << "文件长度：" << fileLength << "B" << std::endl;
     if (code != 150) // 如果不是成功的响应
     {
         std::cerr << "下载失败: " << msg << "\n";

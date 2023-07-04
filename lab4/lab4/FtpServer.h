@@ -15,12 +15,19 @@
 #include <iomanip>
 #include <unordered_map>
 
+#include <thread>
+#include <functional>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+
 #pragma comment(lib, "ws2_32.lib")
 
 #define MAX_BUFFER_SIZE 4096
 
 class Client // 客户端信息
 {
+public:
     sockaddr_in addr; // 客户端地址
     std::string filename; // 文件名
     std::string op;         // 操作
@@ -41,6 +48,9 @@ public:
     }
 };
 
+// 定义任务类型
+using Task = std::function<void()>;
+
 class FtpServer  // FTP服务器
 {
 private:
@@ -60,4 +70,12 @@ public:
     bool up(std::shared_ptr<Client> client);         // 上传文件
     void disconnectClient(SOCKET sc);           // 断开客户端连接
     bool list(std::shared_ptr<Client> client);       // 获取文件列表
+
+private:
+    // 线程池相关成员变量
+    std::vector<std::thread> threadPool; // 线程池
+    std::queue<Task> taskQueue;          // 任务队列
+    std::mutex queueMutex;                  // 互斥量
+    std::condition_variable queueCondVar;    // 条件变量
+    bool stop;                          // 停止标志
 };

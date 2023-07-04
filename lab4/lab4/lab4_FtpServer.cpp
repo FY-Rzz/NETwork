@@ -20,9 +20,146 @@
 #define MAX_BUFFER_SIZE 4096
 
 
-// 构造函数
-FtpServer::FtpServer()
-{
+//// 构造函数
+//FtpServer::FtpServer()
+//{
+//    // 初始化Winsock
+//    WSADATA wsaData;
+//    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
+//    {
+//        std::cerr << "Winsock初始化失败\n";
+//        exit(1);
+//    }
+//
+//    // 初始化服务器地址
+//    ServerAddr.sin_family = AF_INET;
+//    ServerAddr.sin_port = htons(1026); // 使用1026端口
+//    ServerAddr.sin_addr.s_addr = INADDR_ANY;
+//
+//    // 创建套接字
+//    socket = ::socket(AF_INET, SOCK_STREAM, 0);
+//    if (socket == INVALID_SOCKET)
+//    {
+//        std::cerr << "socket创建失败\n";
+//        WSACleanup();
+//        exit(1);
+//    }
+//
+//    // 绑定套接字到服务器地址
+//    if (::bind(socket, (struct sockaddr*)&ServerAddr, sizeof(ServerAddr)) == SOCKET_ERROR)
+//    {
+//        std::cerr << "socket绑定失败\n";
+//        closesocket(socket);
+//        WSACleanup();
+//        exit(1);
+//    }
+//
+//    // 监听套接字
+//    if (::listen(socket, 5) == SOCKET_ERROR)
+//    {
+//        std::cerr << "socket listen失败\n";
+//        closesocket(socket);
+//        WSACleanup();
+//        exit(1);
+//    }
+//
+//    // 初始化客户端集合
+//    FD_ZERO(&clientSet);
+//    FD_SET(socket, &clientSet);
+//    maxfd = socket;
+//}
+//
+//// 析构函数
+//FtpServer::~FtpServer()
+//{
+//    // 关闭所有客户端套接字
+//    for (auto& pair : clientSockets)
+//    {
+//        disconnectClient(pair.first);
+//    }
+//
+//    // 关闭服务器套接字
+//    closesocket(socket);
+//
+//    // 清理Winsock
+//    WSACleanup();
+//}
+//
+//// 接收新任务
+//void FtpServer::recvNewJob()
+//{
+//    fd_set tempSet = clientSet; // 复制客户端集合，避免被select修改
+//
+//    // 使用select等待套接字就绪
+//    int ret = ::select(maxfd + 1, &tempSet, NULL, NULL, NULL);
+//    if (ret == SOCKET_ERROR)
+//    {
+//        std::cerr << "select失败\n";
+//        return;
+//    }
+//
+//    // 遍历客户端集合，检查哪些套接字就绪
+//    for (int i = 0; i <= maxfd; i++)
+//    {
+//        if (FD_ISSET(i, &tempSet))
+//        {
+//            if (i == socket) // 如果是服务器套接字就绪，说明有新的客户端连接请求
+//            {
+//                SOCKET sc = acceptClient(); // 接收客户端
+//                if (sc != INVALID_SOCKET)
+//                {
+//                    FD_SET(sc, &clientSet);          // 将新的客户端套接字加入集合
+//                    if (sc > maxfd) maxfd = sc;      // 更新最大套接字值
+//                    clientSockets[sc] = std::make_shared<Client>(sc); // 创建客户端对象并加入套接字集合
+//                }
+//            }
+//            else // 如果是客户端套接字就绪，说明有新的文件请求
+//            {
+//                SOCKET sc = i;
+//                bool ok = getFile(sc); // 获取文件信息和操作
+//                if (!ok) // 如果获取失败，说明客户端断开连接或出错
+//                {
+//                    disconnectClient(sc);     // 断开客户端连接
+//                    FD_CLR(sc, &clientSet);   // 将客户端套接字从集合中移除
+//                    clientSockets.erase(sc);  // 将客户端对象从套接字集合中移除
+//                }
+//                else // 如果获取成功，说明客户端有合法的文件请求
+//                {
+//                    handleFile(clientSockets[sc]); // 处理文件请求
+//                }
+//            }
+//        }
+//    }
+//}
+//
+//// 接收客户端
+//SOCKET FtpServer::acceptClient()
+//{
+//    struct sockaddr_in ClientAddr; // 客户端地址
+//    int len = sizeof(ClientAddr);
+//
+//    // 接受客户端连接请求
+//    SOCKET sc = ::accept(socket, (struct sockaddr*)&ClientAddr, &len);
+//    if (sc == INVALID_SOCKET)
+//    {
+//        std::cerr << "client连接失败\n";
+//        return INVALID_SOCKET;
+//    }
+//
+//    // 打印客户端信息
+//    std::cout << "连接client from " << inet_ntoa(ClientAddr.sin_addr) << ":" << ntohs(ClientAddr.sin_port) << "\n";
+//
+//    // 发送欢迎信息
+//    std::string welcome = "220 Welcome to FTP Server\n";
+//    ::send(sc, welcome.c_str(), welcome.size(), 0);
+//
+//    return sc;
+//}
+
+
+FtpServer::FtpServer() {
+    // 初始化服务器配置
+    // ...
     // 初始化Winsock
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
@@ -67,11 +204,52 @@ FtpServer::FtpServer()
     FD_ZERO(&clientSet);
     FD_SET(socket, &clientSet);
     maxfd = socket;
+
+    // 创建线程池，根据需要设置线程池大小
+    int poolSize = 10; // 设置线程池大小为10
+    stop = false;
+
+    for (int i = 0; i < poolSize; ++i) {
+        threadPool.emplace_back([this] {
+            while (true) {
+                Task task;
+                {
+                    std::unique_lock<std::mutex> lock(queueMutex);
+                    // 等待任务队列非空
+                    queueCondVar.wait(lock, [this] {
+                        return stop || !taskQueue.empty();
+                        });
+
+                    // 如果线程池停止且任务队列为空，则退出线程
+                    if (stop && taskQueue.empty()) {
+                        return;
+                    }
+
+                    // 取出一个任务进行处理
+                    task = std::move(taskQueue.front());
+                    taskQueue.pop();
+                }
+
+                // 执行任务
+                task();
+            }
+            });
+    }
 }
 
-// 析构函数
-FtpServer::~FtpServer()
-{
+FtpServer::~FtpServer() {
+    {
+        std::unique_lock<std::mutex> lock(queueMutex);
+        stop = true;
+    }
+    queueCondVar.notify_all();
+
+    // 等待所有线程结束
+    for (std::thread& thread : threadPool) {
+        thread.join();
+    }
+
+    // 清理其他资源
     // 关闭所有客户端套接字
     for (auto& pair : clientSockets)
     {
@@ -85,76 +263,81 @@ FtpServer::~FtpServer()
     WSACleanup();
 }
 
-// 接收新任务
-void FtpServer::recvNewJob()
-{
-    fd_set tempSet = clientSet; // 复制客户端集合，避免被select修改
+void FtpServer::recvNewJob() {
+    fd_set tempSet = clientSet;
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 10000; // 设置超时时间为10毫秒
 
     // 使用select等待套接字就绪
-    int ret = ::select(maxfd + 1, &tempSet, NULL, NULL, NULL);
-    if (ret == SOCKET_ERROR)
-    {
+    int ret = ::select(maxfd + 1, &tempSet, nullptr, nullptr, &timeout);
+    if (ret == SOCKET_ERROR) {
         std::cerr << "select失败\n";
         return;
     }
 
     // 遍历客户端集合，检查哪些套接字就绪
-    for (int i = 0; i <= maxfd; i++)
-    {
-        if (FD_ISSET(i, &tempSet))
-        {
-            if (i == socket) // 如果是服务器套接字就绪，说明有新的客户端连接请求
-            {
+    for (int i = 0; i <= maxfd; ++i) {
+        if (FD_ISSET(i, &tempSet)) {
+            if (i == socket) {
                 SOCKET sc = acceptClient(); // 接收客户端
-                if (sc != INVALID_SOCKET)
-                {
-                    FD_SET(sc, &clientSet);          // 将新的客户端套接字加入集合
-                    if (sc > maxfd) maxfd = sc;      // 更新最大套接字值
-                    clientSockets[sc] = std::make_shared<Client>(sc); // 创建客户端对象并加入套接字集合
+                if (sc != INVALID_SOCKET) {
+                    std::shared_ptr<Client> client = std::make_shared<Client>(sc);
+                    {
+                        std::lock_guard<std::mutex> lock(queueMutex);
+                        taskQueue.push([this, client] {
+                            FD_SET(client->socket, &clientSet);
+                            if (client->socket > maxfd) {
+                                maxfd = client->socket;
+                            }
+                            clientSockets[client->socket] = client;
+                            });
+                    }
+                    queueCondVar.notify_one();
                 }
             }
-            else // 如果是客户端套接字就绪，说明有新的文件请求
-            {
+            else {
                 SOCKET sc = i;
-                bool ok = getFile(sc); // 获取文件信息和操作
-                if (!ok) // 如果获取失败，说明客户端断开连接或出错
+                std::shared_ptr<Client> client = clientSockets[sc];
                 {
-                    disconnectClient(sc);     // 断开客户端连接
-                    FD_CLR(sc, &clientSet);   // 将客户端套接字从集合中移除
-                    clientSockets.erase(sc);  // 将客户端对象从套接字集合中移除
+                    // 互斥量上锁
+                    std::lock_guard<std::mutex> lock(queueMutex);
+                    taskQueue.push([this, client] {
+                        bool ok = getFile(client->socket); // 获取文件信息和操作
+                        if (!ok) {
+                            disconnectClient(client->socket);
+                            FD_CLR(client->socket, &clientSet);
+                            clientSockets.erase(client->socket);
+                        }
+                        else {
+                            handleFile(client);
+                        }
+                        });
                 }
-                else // 如果获取成功，说明客户端有合法的文件请求
-                {
-                    handleFile(clientSockets[sc]); // 处理文件请求
-                }
+                queueCondVar.notify_one();
             }
         }
     }
 }
 
-// 接收客户端
-SOCKET FtpServer::acceptClient()
-{
-    struct sockaddr_in ClientAddr; // 客户端地址
+SOCKET FtpServer::acceptClient() {
+    struct sockaddr_in ClientAddr;
     int len = sizeof(ClientAddr);
 
-    // 接受客户端连接请求
     SOCKET sc = ::accept(socket, (struct sockaddr*)&ClientAddr, &len);
-    if (sc == INVALID_SOCKET)
-    {
-        std::cerr << "client接受失败\n";
+    if (sc == INVALID_SOCKET) {
+        std::cerr << "client连接失败\n";
         return INVALID_SOCKET;
     }
 
-    // 打印客户端信息
-    std::cout << "接受client from " << inet_ntoa(ClientAddr.sin_addr) << ":" << ntohs(ClientAddr.sin_port) << "\n";
+    std::cout << "连接client from " << inet_ntoa(ClientAddr.sin_addr) << ":" << ntohs(ClientAddr.sin_port) << "\n";
 
-    // 发送欢迎信息
     std::string welcome = "220 Welcome to FTP Server\n";
     ::send(sc, welcome.c_str(), welcome.size(), 0);
 
     return sc;
 }
+
 
 // 获取文件信息和操作
 bool FtpServer::getFile(SOCKET sc)
@@ -328,7 +511,7 @@ bool FtpServer::up(std::shared_ptr<Client> client)
     file.close();
 
     // 发送完成信息给客户端
-    //sprintf(buffer, "226 Transfer complete\n");
+    sprintf(buffer, "226 Transfer complete\n");
     send(sc, buffer, strlen(buffer), 0);
 
     return true;
